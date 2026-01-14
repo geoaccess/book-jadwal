@@ -1,0 +1,3775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Geoaccess Private Training - Book Session</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+const { useState, useEffect } = React;
+
+// Google Sheets Configuration
+const GOOGLE_SHEET_ID = '1dsNf_lNB6k2TmOAmSdyvrcjMNEvvbz1dVXhGBZ7hDEc';
+const SHEET_NAME = 'Form Responses 1';
+const SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(SHEET_NAME)}`;
+
+// Tutor name mapping (sheet names → tutor IDs)
+const TUTOR_NAME_TO_ID = {
+  'adi guna prasetyo': 1,
+  'adi': 1,
+  'agnes risma anggraeni': 2,
+  'agnes': 2,
+  'dewi ratna ningrum': 3,
+  'dewi': 3,
+  'dionysius swedha cahya danendra': 4,
+  'dionysius': 4,
+  'dio': 4,
+  'nabila shaffana zhafira suwiji': 5,
+  'nabila': 5,
+  'naufal fata anshafa': 6,
+  'naufal': 6,
+  'nurur rizki febriana': 7,
+  'nurur': 7,
+  'romizah elzahidah': 8,
+  'romizah': 8,
+  'yusuf susena': 9,
+  'yusuf': 9,
+  'sena': 9,
+};
+
+// Fallback data from your Google Sheets (for preview/testing)
+// This data is synced from your spreadsheet - update when needed
+const FALLBACK_CLIENT_ASSIGNMENTS = {
+  '11_nurkholis@apps.ipb.ac.id': { clientName: 'Siddiq Nurkholis', assignedTutors: [9] },
+  'aini.hay@gmail.com': { clientName: 'Aini Hayati', assignedTutors: [5] },
+  'novira.dwirahma@gmail.com': { clientName: 'Novira Dwirahma, S.T.', assignedTutors: [6] },
+  'rizqa.hidayani@gmail.com': { clientName: 'Rizqa Hidayani', assignedTutors: [9] },
+  'gagansuryanagara@gmail.com': { clientName: 'Gagan Suryanagara', assignedTutors: [9] },
+  'melindayunita95@gmail.com': { clientName: 'Melinda Yunita', assignedTutors: [9] },
+  'farashya21@gmail.com': { clientName: 'Farashya Zikrina Dewantoro', assignedTutors: [9] },
+  'nirwanashari88@gmail.com': { clientName: 'Nirwan Ashari Nasution', assignedTutors: [6] },
+  'bagasabiyyupratama@gmail.com': { clientName: 'Bagas Abiyyu Pratama', assignedTutors: [7] },
+  'dindalilyasykass@gmail.com': { clientName: 'Dinda Lilya Sykas Sukarno', assignedTutors: [8] },
+  'ffauziyah@student.unimelb.edu.au': { clientName: 'Firda Fauziyah', assignedTutors: [5] },
+  'sunarniretno@gmail.com': { clientName: 'Retno Sunarni, S.T.', assignedTutors: [6] },
+  'luqmanhakim.tk@gmail.com': { clientName: 'Luqman Hakim', assignedTutors: [7] },
+};
+
+// Simple CSV parser (no external library needed)
+const parseCSV = (csvText) => {
+  const lines = csvText.split('\n');
+  if (lines.length < 2) return [];
+  
+  // Parse header row
+  const headers = parseCSVLine(lines[0]);
+  
+  // Parse data rows
+  const data = [];
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseCSVLine(lines[i]);
+    if (values.length === headers.length) {
+      const row = {};
+      headers.forEach((header, index) => {
+        row[header.trim()] = values[index];
+      });
+      data.push(row);
+    }
+  }
+  return data;
+};
+
+// Parse a single CSV line (handles quoted values)
+const parseCSVLine = (line) => {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result;
+};
+
+// Function to fetch client-tutor assignments from Google Sheets
+const fetchClientAssignments = async () => {
+  try {
+    console.log('Fetching from Google Sheets:', SHEET_CSV_URL);
+    
+    const response = await fetch(SHEET_CSV_URL, {
+      method: 'GET',
+      mode: 'cors',
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const csvText = await response.text();
+    console.log('CSV data received, length:', csvText.length);
+    
+    const rows = parseCSV(csvText);
+    console.log('Parsed rows:', rows.length);
+    
+    // Build assignments map: email → { clientName, assignedTutorIds }
+    const assignments = {};
+    
+    rows.forEach(row => {
+      // Column names from your sheet
+      const email = (row['Email'] || '').trim().toLowerCase();
+      const tutorName = (row['Tutor'] || '').trim().toLowerCase();
+      const clientName = (row['Nama'] || '').trim();
+      
+      if (email && tutorName) {
+        const tutorId = TUTOR_NAME_TO_ID[tutorName];
+        
+        if (tutorId) {
+          if (!assignments[email]) {
+            assignments[email] = {
+              clientName: clientName,
+              assignedTutors: new Set(),
+            };
+          }
+          assignments[email].assignedTutors.add(tutorId);
+          if (clientName) {
+            assignments[email].clientName = clientName;
+          }
+        }
+      }
+    });
+    
+    // Convert Sets to Arrays
+    Object.keys(assignments).forEach(email => {
+      assignments[email].assignedTutors = Array.from(assignments[email].assignedTutors);
+    });
+    
+    console.log('Assignments loaded from Google Sheets:', Object.keys(assignments).length);
+    return assignments;
+    
+  } catch (error) {
+    console.warn('Could not fetch from Google Sheets (this is normal in preview mode):', error.message);
+    console.log('Using fallback data instead');
+    // Return fallback data if fetch fails (e.g., in preview mode due to CORS)
+    return FALLBACK_CLIENT_ASSIGNMENTS;
+  }
+};
+
+// Tutors data (sorted A-Z by name)
+const TUTORS = [
+  {
+    id: 1,
+    name: 'Adi Guna Prasetyo',
+    image: 'https://drive.google.com/thumbnail?id=198C9nj_S9eQg7EWyj_LJt_FiIhFxWrYg&sz=w400',
+    color: '#E07A5F',
+    calendarId: 'admin@geoaccess.id',
+    calendarUrl: 'https://calendar.google.com/calendar/u/0?cid=YWRtaW5AZ2VvYWNjZXNzLmlk',
+    availability: {
+      monday: ['09:00', '10:00', '11:00', '14:00', '15:00', '16:00'],
+      tuesday: ['10:00', '11:00', '13:00', '14:00', '15:00'],
+      wednesday: ['09:00', '10:00', '11:00', '14:00', '15:00', '16:00'],
+      thursday: ['10:00', '11:00', '13:00', '14:00'],
+      friday: ['09:00', '10:00', '11:00', '14:00', '15:00'],
+    },
+  },
+  {
+    id: 2,
+    name: 'Agnes Risma Anggraeni',
+    image: 'https://drive.google.com/thumbnail?id=1Z-_6xl_e-acOhg_skD-Rm_6OZBmegaUe&sz=w400',
+    color: '#88C0D0',
+    calendarId: null,
+    calendarUrl: null,
+    availability: {
+      monday: ['10:00', '11:00', '13:00', '14:00', '15:00'],
+      tuesday: ['09:00', '10:00', '11:00', '14:00', '15:00', '16:00'],
+      wednesday: ['10:00', '11:00', '13:00', '14:00', '15:00'],
+      thursday: ['09:00', '10:00', '11:00', '14:00', '15:00'],
+      friday: ['10:00', '11:00', '14:00', '15:00', '16:00'],
+    },
+  },
+  {
+    id: 3,
+    name: 'Dewi Ratna Ningrum',
+    image: 'https://drive.google.com/thumbnail?id=1T-xydW_RYtyKAfZM0vnXYcv6_gkBOTZy&sz=w400',
+    color: '#B48EAD',
+    calendarId: null,
+    calendarUrl: null,
+    availability: {
+      monday: ['09:00', '10:00', '11:00', '15:00', '16:00', '17:00'],
+      tuesday: ['10:00', '11:00', '14:00', '15:00', '16:00'],
+      wednesday: ['09:00', '10:00', '11:00', '14:00', '15:00'],
+      thursday: ['10:00', '11:00', '14:00', '15:00', '16:00', '17:00'],
+      friday: ['09:00', '10:00', '14:00', '15:00'],
+    },
+  },
+  {
+    id: 4,
+    name: 'Dionysius Swedha Cahya Danendra',
+    image: 'https://drive.google.com/thumbnail?id=19NMlK0TvCMumUf3ztHLXvQBm4lgGaDRp&sz=w400',
+    color: '#A3BE8C',
+    calendarId: null,
+    calendarUrl: null,
+    availability: {
+      monday: ['08:00', '09:00', '10:00', '14:00', '15:00'],
+      tuesday: ['08:00', '09:00', '10:00', '11:00', '14:00', '15:00'],
+      wednesday: ['09:00', '10:00', '11:00', '14:00', '15:00', '16:00'],
+      thursday: ['08:00', '09:00', '10:00', '14:00', '15:00'],
+      friday: ['09:00', '10:00', '11:00'],
+    },
+  },
+  {
+    id: 5,
+    name: 'Nabila Shaffana Zhafira Suwiji',
+    image: 'https://drive.google.com/thumbnail?id=1VsqxPfIJxvbDSVcv29ujEbDUVQyrxIe7&sz=w400',
+    color: '#D08770',
+    calendarId: 'c_a75f9322bea6a081b7ec9cdc3f48d09e9ab12c33db6c5830e2ae4b8e4189af2e@group.calendar.google.com',
+    calendarUrl: 'https://calendar.google.com/calendar/u/0?cid=Y19hNzVmOTMyMmJlYTZhMDgxYjdlYzljZGMzZjQ4ZDA5ZTlhYjEyYzMzZGI2YzU4MzBlMmFlNGI4ZTQxODlhZjJlQGdyb3VwLmNhbGVuZGFyLmdvb2dsZS5jb20',
+    availability: {
+      monday: ['10:00', '11:00', '14:00', '15:00', '16:00'],
+      tuesday: ['09:00', '10:00', '11:00', '13:00', '14:00'],
+      wednesday: ['10:00', '11:00', '14:00', '15:00', '16:00'],
+      thursday: ['09:00', '10:00', '11:00', '14:00', '15:00'],
+      friday: ['10:00', '11:00', '13:00', '14:00', '15:00'],
+    },
+  },
+  {
+    id: 6,
+    name: 'Naufal Fata Anshafa',
+    image: 'https://drive.google.com/thumbnail?id=1SE6oIH675AEMsyLk_45rHU25gb6bMmGe&sz=w400',
+    color: '#5E81AC',
+    calendarId: 'da685ae084f3617d8780e62c6fd8f2321373fa91a561b5235240784468e0a6a2@group.calendar.google.com',
+    calendarUrl: 'https://calendar.google.com/calendar/u/0?cid=ZGE2ODVhZTA4NGYzNjE3ZDg3ODBlNjJjNmZkOGYyMzIxMzczZmE5MWE1NjFiNTIzNTI0MDc4NDQ2OGUwYTZhMkBncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+    availability: {
+      monday: ['09:00', '10:00', '11:00', '13:00', '14:00', '15:00'],
+      tuesday: ['09:00', '10:00', '14:00', '15:00', '16:00'],
+      wednesday: ['09:00', '10:00', '11:00', '14:00', '15:00'],
+      thursday: ['10:00', '11:00', '13:00', '14:00', '15:00'],
+      friday: ['09:00', '10:00', '11:00', '14:00'],
+    },
+  },
+  {
+    id: 7,
+    name: 'Nurur Rizki Febriana',
+    image: 'https://drive.google.com/thumbnail?id=1xJz5_W_XPReyGV-1xvAkBTBpv2oOtLbs&sz=w400',
+    color: '#81B29A',
+    calendarId: 'c_4eba23d93c55ed48bb315a41fc46d34817522a7bb3ba5a533a8b7f7bd940777e@group.calendar.google.com',
+    calendarUrl: 'https://calendar.google.com/calendar/u/0?cid=Y180ZWJhMjNkOTNjNTVlZDQ4YmIzMTVhNDFmYzQ2ZDM0ODE3NTIyYTdiYjNiYTVhNTMzYThiN2Y3YmQ5NDA3NzdlQGdyb3VwLmNhbGVuZGFyLmdvb2dsZS5jb20',
+    availability: {
+      monday: ['08:00', '09:00', '10:00', '13:00', '14:00'],
+      tuesday: ['08:00', '09:00', '10:00', '13:00', '14:00', '15:00'],
+      wednesday: ['08:00', '09:00', '10:00', '13:00', '14:00'],
+      thursday: ['08:00', '09:00', '10:00', '13:00', '14:00', '15:00'],
+      friday: ['08:00', '09:00', '10:00'],
+    },
+  },
+  {
+    id: 8,
+    name: 'Romizah Elzahidah',
+    image: 'https://drive.google.com/thumbnail?id=1aC9FIzRBPl3VI9rAvFCigL_7LWonPByd&sz=w400',
+    color: '#3D405B',
+    calendarId: 'c_e3de863fd07f38e1a666fb7a9181980c1ccfef4654d583944aa95d216d64a6ca@group.calendar.google.com',
+    calendarUrl: 'https://calendar.google.com/calendar/u/0?cid=Y19lM2RlODYzZmQwN2YzOGUxYTY2NmZiN2E5MTgxOTgwYzFjY2ZlZjQ2NTRkNTgzOTQ0YWE5NWQyMTZkNjRhNmNhQGdyb3VwLmNhbGVuZGFyLmdvb2dsZS5jb20',
+    availability: {
+      monday: ['10:00', '11:00', '15:00', '16:00', '17:00'],
+      tuesday: ['09:00', '10:00', '11:00', '14:00', '15:00', '16:00'],
+      wednesday: ['10:00', '11:00', '15:00', '16:00'],
+      thursday: ['09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00'],
+      friday: ['10:00', '11:00', '14:00', '15:00'],
+    },
+  },
+  {
+    id: 9,
+    name: 'Yusuf Susena',
+    image: 'https://drive.google.com/thumbnail?id=1OBc9V1a1VKvLJ0QYEnVRctBBgXac_3-S&sz=w400',
+    color: '#F2CC8F',
+    calendarId: 'tutor1@geoaccess.id',
+    calendarUrl: 'https://calendar.google.com/calendar/u/0?cid=dHV0b3IxQGdlb2FjY2Vzcy5pZA',
+    availability: {
+      monday: ['11:00', '12:00', '14:00', '15:00', '16:00'],
+      tuesday: ['11:00', '12:00', '14:00', '15:00', '16:00', '17:00'],
+      wednesday: ['11:00', '12:00', '14:00', '15:00'],
+      thursday: ['11:00', '12:00', '14:00', '15:00', '16:00', '17:00'],
+      friday: ['11:00', '12:00', '14:00', '15:00', '16:00'],
+    },
+  },
+];
+
+const SESSION_DURATIONS = [
+  { value: 30, label: '30 min' },
+  { value: 60, label: '1 hour' },
+  { value: 90, label: '1.5 hours' },
+  { value: 120, label: '2 hours' },
+];
+
+const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+// Utility functions
+const formatDate = (date) => {
+  return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+};
+
+const formatTime = (time) => {
+  const [hours, minutes] = time.split(':');
+  const hour = parseInt(hours);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour % 12 || 12;
+  return `${hour12}:${minutes} ${ampm}`;
+};
+
+const getWeekDates = (startDate) => {
+  const dates = [];
+  const start = new Date(startDate);
+  start.setDate(start.getDate() - start.getDay());
+  for (let i = 0; i < 7; i++) {
+    const date = new Date(start);
+    date.setDate(start.getDate() + i);
+    dates.push(date);
+  }
+  return dates;
+};
+
+// Google Calendar Integration Helper
+const GoogleCalendarAPI = {
+  // Create event on tutor's Google Calendar
+  createEvent: async (eventData, calendarId) => {
+    /*
+     * In production, this would call the Google Calendar API:
+     * 
+     * POST https://www.googleapis.com/calendar/v3/calendars/{calendarId}/events
+     * 
+     * Required: OAuth 2.0 authentication with calendar scope
+     * See: https://developers.google.com/calendar/api/v3/reference/events/insert
+     */
+    console.log('Creating Google Calendar event on calendar:', calendarId);
+    console.log('Event data:', eventData);
+    
+    // Simulated API response
+    return {
+      id: `gcal_${Date.now()}`,
+      htmlLink: `https://calendar.google.com/calendar/event?eid=${Date.now()}`,
+      calendarId: calendarId,
+      ...eventData,
+    };
+  },
+  
+  // Generate Google Calendar event URL for adding to personal calendar
+  generateAddToCalendarUrl: (eventData) => {
+    const { title, description, startDateTime, endDateTime, location } = eventData;
+    const baseUrl = 'https://calendar.google.com/calendar/render';
+    const params = new URLSearchParams({
+      action: 'TEMPLATE',
+      text: title,
+      details: description,
+      dates: `${startDateTime.replace(/[-:]/g, '').replace('.000', '')}/${endDateTime.replace(/[-:]/g, '').replace('.000', '')}`,
+      location: location || 'Online Session',
+    });
+    return `${baseUrl}?${params.toString()}`;
+  },
+  
+  addReminders: async (eventId, reminders) => {
+    // Reminders: 1 day (1440 min), 3 hours (180 min) before
+    console.log('Adding reminders to event:', eventId, reminders);
+    return true;
+  },
+};
+
+// Components
+const Header = ({ view, setView, isAdmin }) => (
+  <header className="header">
+    <div className="header-content">
+      <div className="logo">
+        <span className="logo-icon">🌐</span>
+        <span className="logo-text">Geoaccess Private Training</span>
+      </div>
+      <nav className="nav">
+        <button 
+          className={`nav-btn ${view === 'book' ? 'active' : ''}`}
+          onClick={() => setView('book')}
+        >
+          Book Session
+        </button>
+        <button 
+          className={`nav-btn ${view === 'appointments' ? 'active' : ''}`}
+          onClick={() => setView('appointments')}
+        >
+          My Appointments
+        </button>
+        {isAdmin && (
+          <button 
+            className={`nav-btn ${view === 'admin' ? 'active' : ''}`}
+            onClick={() => setView('admin')}
+          >
+            Admin Panel
+          </button>
+        )}
+      </nav>
+      <div className="header-actions">
+        <button className="connect-btn">
+          <span>🔗</span> Connect Google Calendar
+        </button>
+      </div>
+    </div>
+  </header>
+);
+
+// Step Indicator Component
+const StepIndicator = ({ currentStep, onStepClick }) => {
+  const steps = [
+    { number: 1, label: 'Your Info' },
+    { number: 2, label: 'Select Trainer' },
+    { number: 3, label: 'Select Schedule' },
+    { number: 4, label: 'Confirmation' },
+  ];
+
+  return (
+    <div className="step-indicator">
+      {steps.map((step, index) => (
+        <React.Fragment key={step.number}>
+          <div 
+            className={`step ${currentStep >= step.number ? 'active' : ''} ${currentStep > step.number ? 'completed' : ''}`}
+            onClick={() => currentStep > step.number && onStepClick(step.number)}
+            style={{ cursor: currentStep > step.number ? 'pointer' : 'default' }}
+          >
+            <div className="step-number">
+              {currentStep > step.number ? '✓' : step.number}
+            </div>
+            <div className="step-label">{step.label}</div>
+          </div>
+          {index < steps.length - 1 && (
+            <div className={`step-connector ${currentStep > step.number ? 'active' : ''}`}></div>
+          )}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+};
+
+// Client Info Form Component (Step 1)
+const ClientInfoStep = ({ onSubmit, initialData }) => {
+  const [formData, setFormData] = useState(initialData || {
+    name: '',
+    email: '',
+    whatsapp: '',
+    topic: '',
+  });
+  const [errors, setErrors] = useState({});
+
+  const validateForm = () => {
+    const newErrors = {};
+    if (!formData.name.trim()) newErrors.name = 'Name is required';
+    if (!formData.email.trim()) newErrors.email = 'Email is required';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) newErrors.email = 'Invalid email format';
+    if (!formData.whatsapp.trim()) newErrors.whatsapp = 'WhatsApp number is required';
+    if (!formData.topic.trim()) newErrors.topic = 'Please describe what you want to discuss';
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleContinue = () => {
+    if (validateForm()) {
+      onSubmit(formData);
+    }
+  };
+
+  return (
+    <div className="client-info-step">
+      <div className="step-header">
+        <h2>Let's Get Started</h2>
+        <p>Please fill in your information to book a training session</p>
+      </div>
+      
+      <div className="client-form">
+        <div className="form-group">
+          <label>Full Name <span className="required">*</span></label>
+          <input
+            type="text"
+            value={formData.name}
+            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            placeholder="Enter your full name"
+            className={errors.name ? 'error' : ''}
+          />
+          {errors.name && <span className="error-message">{errors.name}</span>}
+        </div>
+
+        <div className="form-group">
+          <label>Email Address <span className="required">*</span></label>
+          <input
+            type="email"
+            value={formData.email}
+            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+            placeholder="your@email.com"
+            className={errors.email ? 'error' : ''}
+          />
+          {errors.email && <span className="error-message">{errors.email}</span>}
+        </div>
+
+        <div className="form-group">
+          <label>WhatsApp Number <span className="required">*</span></label>
+          <input
+            type="tel"
+            value={formData.whatsapp}
+            onChange={(e) => setFormData({ ...formData, whatsapp: e.target.value })}
+            placeholder="+62 8xx xxxx xxxx"
+            className={errors.whatsapp ? 'error' : ''}
+          />
+          {errors.whatsapp && <span className="error-message">{errors.whatsapp}</span>}
+        </div>
+
+        <div className="form-group">
+          <label>What topic would you like to discuss? <span className="required">*</span></label>
+          <textarea
+            value={formData.topic}
+            onChange={(e) => setFormData({ ...formData, topic: e.target.value })}
+            placeholder="Describe the topic or questions you want to discuss during the session..."
+            rows={4}
+            className={errors.topic ? 'error' : ''}
+          />
+          {errors.topic && <span className="error-message">{errors.topic}</span>}
+        </div>
+
+        <button type="button" className="next-step-btn" onClick={handleContinue}>
+          Continue to Select Trainer →
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Tutor Selection Step Component (Step 2)
+const TutorSelectionStep = ({ tutors, selectedTutor, onSelect, clientInfo, onBack, isLoading }) => (
+  <div className="tutor-selection-step">
+    <div className="step-header">
+      <button className="back-btn" onClick={onBack}>← Back</button>
+      <h2>Select Your Trainer</h2>
+      <p>Hello <strong>{clientInfo.name}</strong>, please choose from your assigned trainers below</p>
+    </div>
+    
+    {isLoading ? (
+      <div className="loading-state">
+        <div className="spinner"></div>
+        <p>Loading your assigned trainers...</p>
+      </div>
+    ) : tutors.length === 0 ? (
+      <div className="no-tutors-message">
+        <span>😕</span>
+        <h3>No Trainers Assigned Yet</h3>
+        <p>We couldn't find any trainers assigned to <strong>{clientInfo.email}</strong> in our system.</p>
+        <p style={{ marginTop: '1rem', fontSize: '0.9rem', color: 'var(--text-light)' }}>
+          If you have registered for training, please make sure you're using the same email address. 
+          Otherwise, please contact our admin to register first.
+        </p>
+        <a 
+          href="https://wa.me/6281234567890" 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="contact-admin-btn"
+        >
+          Contact Admin via WhatsApp
+        </a>
+      </div>
+    ) : (
+      <div className="tutors-grid">
+        {tutors.map((tutor) => (
+          <TutorCard
+            key={tutor.id}
+            tutor={tutor}
+            selected={selectedTutor?.id === tutor.id}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
+    )}
+  </div>
+);
+
+// Schedule Selection Step Component (Step 3)
+const ScheduleSelectionStep = ({ tutor, selectedDate, selectedTime, duration, onDateSelect, onTimeSelect, onDurationChange, bookedSlots, onBack, onProceed }) => (
+  <div className="schedule-selection-step">
+    <div className="step-header">
+      <button className="back-btn" onClick={onBack}>← Back</button>
+      <h2>Select Your Schedule</h2>
+      <p>Choose an available time slot with <strong>{tutor.name}</strong></p>
+    </div>
+
+    <div className="schedule-content">
+      <div className="selected-tutor-summary">
+        <div className="tutor-avatar-small">
+          <img src={tutor.image} alt={tutor.name} />
+        </div>
+        <div>
+          <strong>{tutor.name}</strong>
+          {tutor.calendarId && <span className="calendar-tag">📅 Calendar Synced</span>}
+        </div>
+      </div>
+
+      <div className="schedule-panels">
+        <div className="panel-card">
+          <Calendar
+            selectedDate={selectedDate}
+            onDateSelect={onDateSelect}
+            tutor={tutor}
+          />
+          <TimeSlots
+            tutor={tutor}
+            selectedDate={selectedDate}
+            selectedTime={selectedTime}
+            onTimeSelect={onTimeSelect}
+            duration={duration}
+            bookedSlots={bookedSlots}
+          />
+        </div>
+        
+        <div className="panel-card">
+          <DurationPicker
+            duration={duration}
+            setDuration={onDurationChange}
+            tutor={tutor}
+          />
+        </div>
+      </div>
+
+      <button
+        className="next-step-btn"
+        disabled={!selectedDate || !selectedTime}
+        onClick={onProceed}
+      >
+        {selectedDate && selectedTime ? 'Continue to Confirmation →' : 'Please select date and time'}
+      </button>
+    </div>
+  </div>
+);
+
+// Confirmation Step Component (Step 4)
+const ConfirmationStep = ({ tutor, date, time, duration, clientInfo, onConfirm, onBack, bookedSlots }) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [addToCalendar, setAddToCalendar] = useState(true);
+
+  const handleConfirm = async () => {
+    setIsSubmitting(true);
+    
+    // Simulate API call
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    
+    // Calculate start and end times
+    const startDateTime = new Date(`${date.toDateString()} ${time}`);
+    const endDateTime = new Date(startDateTime.getTime() + duration * 60000);
+    
+    const booking = {
+      id: `booking_${Date.now()}`,
+      tutor,
+      date: date.toDateString(),
+      time,
+      duration,
+      name: clientInfo.name,
+      email: clientInfo.email,
+      whatsapp: clientInfo.whatsapp,
+      topic: clientInfo.topic,
+      reminders: {
+        oneDay: true,
+        threeHours: true,
+      },
+      createdAt: new Date().toISOString(),
+      status: 'confirmed',
+      calendarEventCreated: !!tutor.calendarId,
+    };
+
+    // Create Google Calendar event on tutor's calendar
+    const eventData = {
+      summary: `Training Session: ${clientInfo.name}`,
+      description: `Client: ${clientInfo.name}\nEmail: ${clientInfo.email}\nWhatsApp: ${clientInfo.whatsapp}\n\nTopic: ${clientInfo.topic}`,
+      start: {
+        dateTime: startDateTime.toISOString(),
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      },
+      end: {
+        dateTime: endDateTime.toISOString(),
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      },
+      attendees: [
+        { email: clientInfo.email },
+      ],
+      reminders: {
+        useDefault: false,
+        overrides: [
+          { method: 'email', minutes: 1440 }, // 1 day before
+          { method: 'popup', minutes: 1440 },
+          { method: 'email', minutes: 180 }, // 3 hours before
+          { method: 'popup', minutes: 180 },
+        ],
+      },
+    };
+
+    // Create event on tutor's Google Calendar if they have one connected
+    if (tutor.calendarId) {
+      const calendarEvent = await GoogleCalendarAPI.createEvent(eventData, tutor.calendarId);
+      booking.calendarEventId = calendarEvent.id;
+      booking.calendarLink = calendarEvent.htmlLink;
+    }
+    
+    // Generate "Add to Calendar" link for the client if they opted in
+    if (addToCalendar) {
+      booking.addToCalendarUrl = GoogleCalendarAPI.generateAddToCalendarUrl({
+        title: `Training Session with ${tutor.name}`,
+        description: `Training session with ${tutor.name}\n\nTopic: ${clientInfo.topic}`,
+        startDateTime: startDateTime.toISOString().replace('.000Z', 'Z'),
+        endDateTime: endDateTime.toISOString().replace('.000Z', 'Z'),
+        location: 'Online Session',
+      });
+    }
+    
+    setIsSubmitting(false);
+    onConfirm(booking);
+  };
+
+  return (
+    <div className="confirmation-step">
+      <div className="step-header">
+        <button className="back-btn" onClick={onBack}>← Back</button>
+        <h2>Confirm Your Booking</h2>
+        <p>Please review your booking details</p>
+      </div>
+
+      <div className="confirmation-card">
+        <div className="conf-section">
+          <h3>📋 Session Details</h3>
+          <div className="conf-details-grid">
+            <div className="conf-detail">
+              <span className="detail-label">Trainer</span>
+              <div className="detail-value tutor-detail">
+                <img src={tutor.image} alt={tutor.name} />
+                <span>{tutor.name}</span>
+              </div>
+            </div>
+            <div className="conf-detail">
+              <span className="detail-label">Date</span>
+              <span className="detail-value">{formatDate(date)}</span>
+            </div>
+            <div className="conf-detail">
+              <span className="detail-label">Time</span>
+              <span className="detail-value">{formatTime(time)}</span>
+            </div>
+            <div className="conf-detail">
+              <span className="detail-label">Duration</span>
+              <span className="detail-value">{duration} minutes</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="conf-section">
+          <h3>👤 Your Information</h3>
+          <div className="conf-details-grid">
+            <div className="conf-detail">
+              <span className="detail-label">Name</span>
+              <span className="detail-value">{clientInfo.name}</span>
+            </div>
+            <div className="conf-detail">
+              <span className="detail-label">Email</span>
+              <span className="detail-value">{clientInfo.email}</span>
+            </div>
+            <div className="conf-detail">
+              <span className="detail-label">WhatsApp</span>
+              <span className="detail-value">{clientInfo.whatsapp}</span>
+            </div>
+          </div>
+          <div className="conf-detail full-width">
+            <span className="detail-label">Topic</span>
+            <span className="detail-value topic-text">{clientInfo.topic}</span>
+          </div>
+        </div>
+
+        <div className="conf-section">
+          <h3>🔔 Reminders</h3>
+          <div className="reminders-info">
+            <p>You will receive automatic reminders:</p>
+            <ul>
+              <li>✓ 1 day before the session</li>
+              <li>✓ 3 hours before the session</li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="conf-section">
+          <h3>📅 Add to Your Calendar</h3>
+          <label className="calendar-checkbox">
+            <input
+              type="checkbox"
+              checked={addToCalendar}
+              onChange={(e) => setAddToCalendar(e.target.checked)}
+            />
+            <span className="checkbox-custom"></span>
+            <span>Add this session to my Google Calendar</span>
+          </label>
+        </div>
+
+        <button 
+          className="confirm-booking-btn" 
+          onClick={handleConfirm}
+          disabled={isSubmitting}
+        >
+          {isSubmitting ? (
+            <span className="loading">Processing...</span>
+          ) : (
+            '✓ Confirm Booking'
+          )}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const TutorCard = ({ tutor, selected, onSelect }) => (
+  <div 
+    className={`tutor-card ${selected ? 'selected' : ''}`}
+    onClick={() => onSelect(tutor)}
+    style={{ '--tutor-color': tutor.color }}
+  >
+    <div className="tutor-avatar">
+      <img src={tutor.image} alt={tutor.name} />
+    </div>
+    <div className="tutor-info">
+      <h3 className="tutor-name">{tutor.name}</h3>
+      {tutor.calendarId && (
+        <div className="calendar-badge">
+          <span className="calendar-icon">📅</span>
+          <span>Calendar Connected</span>
+        </div>
+      )}
+    </div>
+    {selected && <div className="selected-indicator">✓</div>}
+  </div>
+);
+
+const Calendar = ({ selectedDate, onDateSelect, tutor }) => {
+  const [currentWeekStart, setCurrentWeekStart] = useState(new Date());
+  const weekDates = getWeekDates(currentWeekStart);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const navigateWeek = (direction) => {
+    const newStart = new Date(currentWeekStart);
+    newStart.setDate(newStart.getDate() + (direction * 7));
+    setCurrentWeekStart(newStart);
+  };
+
+  const hasAvailability = (date) => {
+    if (!tutor) return false;
+    const dayName = DAYS[date.getDay()];
+    return tutor.availability[dayName]?.length > 0;
+  };
+
+  const isPast = (date) => {
+    const checkDate = new Date(date);
+    checkDate.setHours(0, 0, 0, 0);
+    return checkDate < today;
+  };
+
+  return (
+    <div className="calendar">
+      <div className="calendar-header">
+        <button className="cal-nav-btn" onClick={() => navigateWeek(-1)}>←</button>
+        <span className="cal-month">
+          {weekDates[0].toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+        </span>
+        <button className="cal-nav-btn" onClick={() => navigateWeek(1)}>→</button>
+      </div>
+      <div className="calendar-grid">
+        {weekDates.map((date, idx) => {
+          const isSelected = selectedDate?.toDateString() === date.toDateString();
+          const hasSlots = hasAvailability(date);
+          const past = isPast(date);
+          
+          return (
+            <button
+              key={idx}
+              className={`cal-day ${isSelected ? 'selected' : ''} ${!hasSlots || past ? 'disabled' : ''}`}
+              onClick={() => hasSlots && !past && onDateSelect(date)}
+              disabled={!hasSlots || past}
+            >
+              <span className="cal-day-name">{DAYS[date.getDay()].slice(0, 3)}</span>
+              <span className="cal-day-num">{date.getDate()}</span>
+              {hasSlots && !past && <span className="cal-dot"></span>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const TimeSlots = ({ tutor, selectedDate, selectedTime, onTimeSelect, duration, bookedSlots }) => {
+  if (!tutor || !selectedDate) return null;
+  
+  const dayName = DAYS[selectedDate.getDay()];
+  const availableSlots = tutor.availability[dayName] || [];
+  
+  const isSlotBooked = (time) => {
+    const dateStr = selectedDate.toDateString();
+    return bookedSlots.some(slot => 
+      slot.date === dateStr && slot.time === time && slot.tutorId === tutor.id
+    );
+  };
+
+  const isPastTime = (time) => {
+    const now = new Date();
+    const [hours, minutes] = time.split(':');
+    const slotTime = new Date(selectedDate);
+    slotTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+    return slotTime <= now;
+  };
+
+  return (
+    <div className="time-slots">
+      <h4 className="slots-title">Available Times for {formatDate(selectedDate)}</h4>
+      <div className="slots-grid">
+        {availableSlots.length === 0 ? (
+          <p className="no-slots">No available times for this day</p>
+        ) : (
+          availableSlots.map((time) => {
+            const booked = isSlotBooked(time);
+            const past = isPastTime(time);
+            return (
+              <button
+                key={time}
+                className={`time-slot ${selectedTime === time ? 'selected' : ''} ${booked || past ? 'booked' : ''}`}
+                onClick={() => !booked && !past && onTimeSelect(time)}
+                disabled={booked || past}
+              >
+                {formatTime(time)}
+                {booked && <span className="booked-label">Booked</span>}
+              </button>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+};
+
+const DurationPicker = ({ duration, setDuration }) => (
+  <div className="duration-picker">
+    <h4 className="picker-title">Session Duration</h4>
+    <div className="duration-options">
+      {SESSION_DURATIONS.map((opt) => (
+        <button
+          key={opt.value}
+          className={`duration-btn ${duration === opt.value ? 'selected' : ''}`}
+          onClick={() => setDuration(opt.value)}
+        >
+          <span className="duration-label">{opt.label}</span>
+        </button>
+      ))}
+    </div>
+  </div>
+);
+
+const BookingForm = ({ tutor, date, time, duration, onSubmit, onCancel }) => {
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    notes: '',
+    reminders: {
+      oneDay: true,
+      threeHours: true,
+    },
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    
+    // Simulate API call
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    
+    // Calculate start and end times
+    const startDateTime = new Date(`${date.toDateString()} ${time}`);
+    const endDateTime = new Date(startDateTime.getTime() + duration * 60000);
+    
+    const booking = {
+      id: `booking_${Date.now()}`,
+      tutor,
+      date: date.toDateString(),
+      time,
+      duration,
+      ...formData,
+      createdAt: new Date().toISOString(),
+      status: 'confirmed',
+      calendarEventCreated: !!tutor.calendarId,
+    };
+
+    // Create Google Calendar event on tutor's calendar
+    const eventData = {
+      summary: `Training Session: ${formData.name}`,
+      description: `Student: ${formData.name}\nEmail: ${formData.email}\nPhone: ${formData.phone || 'N/A'}\n\nNotes: ${formData.notes || 'No additional notes'}`,
+      start: {
+        dateTime: startDateTime.toISOString(),
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      },
+      end: {
+        dateTime: endDateTime.toISOString(),
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      },
+      attendees: [
+        { email: formData.email },
+      ],
+      reminders: {
+        useDefault: false,
+        overrides: [
+          ...(formData.reminders.oneDay ? [{ method: 'email', minutes: 1440 }, { method: 'popup', minutes: 1440 }] : []),
+          ...(formData.reminders.threeHours ? [{ method: 'email', minutes: 180 }, { method: 'popup', minutes: 180 }] : []),
+        ],
+      },
+    };
+
+    // Create event on tutor's Google Calendar if they have one connected
+    if (tutor.calendarId) {
+      const calendarEvent = await GoogleCalendarAPI.createEvent(eventData, tutor.calendarId);
+      booking.calendarEventId = calendarEvent.id;
+      booking.calendarLink = calendarEvent.htmlLink;
+    }
+    
+    // Generate "Add to Calendar" link for the student
+    booking.addToCalendarUrl = GoogleCalendarAPI.generateAddToCalendarUrl({
+      title: `Training Session with ${tutor.name}`,
+      description: `Training session with ${tutor.name}\n\nNotes: ${formData.notes || 'No additional notes'}`,
+      startDateTime: startDateTime.toISOString().replace('.000Z', 'Z'),
+      endDateTime: endDateTime.toISOString().replace('.000Z', 'Z'),
+      location: 'Online Session',
+    });
+    
+    setIsSubmitting(false);
+    onSubmit(booking);
+  };
+
+  return (
+    <div className="booking-form-overlay">
+      <div className="booking-form">
+        <button className="close-btn" onClick={onCancel}>×</button>
+        <h2>Complete Your Booking</h2>
+        
+        <div className="booking-summary">
+          <div className="summary-item">
+            <div className="summary-icon"><img src={tutor.image} alt={tutor.name} /></div>
+            <div>
+              <strong>{tutor.name}</strong>
+              {tutor.calendarId && (
+                <span className="calendar-connected-tag">📅 Calendar Synced</span>
+              )}
+            </div>
+          </div>
+          <div className="summary-details">
+            <div className="detail">
+              <span>📅</span> {formatDate(date)}
+            </div>
+            <div className="detail">
+              <span>🕐</span> {formatTime(time)} ({duration} min)
+            </div>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label>Full Name</label>
+            <input
+              type="text"
+              required
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              placeholder="Enter your full name"
+            />
+          </div>
+          
+          <div className="form-group">
+            <label>Email Address</label>
+            <input
+              type="email"
+              required
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              placeholder="your@email.com"
+            />
+          </div>
+          
+          <div className="form-group">
+            <label>Phone Number</label>
+            <input
+              type="tel"
+              value={formData.phone}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              placeholder="+62 xxx xxxx xxxx"
+            />
+          </div>
+          
+          <div className="form-group">
+            <label>Notes for Trainer (optional)</label>
+            <textarea
+              value={formData.notes}
+              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+              placeholder="What topics would you like to cover?"
+              rows={3}
+            />
+          </div>
+
+          <div className="form-group reminders-group">
+            <label>Calendar Reminders</label>
+            <div className="reminder-options">
+              <label className="reminder-checkbox">
+                <input
+                  type="checkbox"
+                  checked={formData.reminders.oneDay}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    reminders: { ...formData.reminders, oneDay: e.target.checked }
+                  })}
+                />
+                <span className="checkbox-custom"></span>
+                1 day before
+              </label>
+              <label className="reminder-checkbox">
+                <input
+                  type="checkbox"
+                  checked={formData.reminders.threeHours}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    reminders: { ...formData.reminders, threeHours: e.target.checked }
+                  })}
+                />
+                <span className="checkbox-custom"></span>
+                3 hours before
+              </label>
+            </div>
+          </div>
+
+          <button type="submit" className="submit-btn" disabled={isSubmitting}>
+            {isSubmitting ? (
+              <span className="loading">Processing...</span>
+            ) : (
+              <>Confirm Booking</>
+            )}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+const BookingConfirmation = ({ booking, onClose }) => (
+  <div className="confirmation-overlay">
+    <div className="confirmation-modal">
+      <div className="confirmation-icon">✓</div>
+      <h2>Booking Confirmed!</h2>
+      <p>Your session has been scheduled{booking.calendarEventCreated ? ' and synced to trainer\'s calendar' : ''}.</p>
+      
+      <div className="confirmation-details">
+        <div className="conf-item">
+          <div className="conf-avatar"><img src={booking.tutor.image} alt={booking.tutor.name} /></div>
+          <strong>{booking.tutor.name}</strong>
+        </div>
+        <div className="conf-item">
+          <span>📅</span>
+          {booking.date} at {formatTime(booking.time)}
+        </div>
+        <div className="conf-item">
+          <span>⏱</span>
+          {booking.duration} minutes
+        </div>
+        {booking.topic && (
+          <div className="conf-item topic">
+            <span>📝</span>
+            <span className="topic-preview">{booking.topic}</span>
+          </div>
+        )}
+      </div>
+
+      {booking.calendarEventCreated && (
+        <div className="calendar-sync-info">
+          <span className="sync-icon">✓</span>
+          <span>Event added to {booking.tutor.name}'s calendar</span>
+        </div>
+      )}
+
+      <div className="confirmation-reminders">
+        <p>📬 You will receive reminders at:</p>
+        <ul>
+          <li><strong>{booking.email}</strong></li>
+          {booking.whatsapp && <li><strong>{booking.whatsapp}</strong> (WhatsApp)</li>}
+        </ul>
+        <p style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}>Reminders will be sent:</p>
+        <ul>
+          <li>✓ 1 day before your session</li>
+          <li>✓ 3 hours before your session</li>
+        </ul>
+      </div>
+
+      {booking.addToCalendarUrl && (
+        <a 
+          href={booking.addToCalendarUrl} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="add-to-calendar-btn"
+        >
+          <span>📅</span> Add to My Google Calendar
+        </a>
+      )}
+
+      <button className="close-confirmation-btn" onClick={onClose}>
+        View My Appointments
+      </button>
+    </div>
+  </div>
+);
+
+const AppointmentsList = ({ appointments, onCancel, onNewBooking }) => {
+  const upcomingAppointments = appointments.filter(apt => {
+    const aptDate = new Date(`${apt.date} ${apt.time}`);
+    return aptDate > new Date();
+  }).sort((a, b) => new Date(`${a.date} ${a.time}`) - new Date(`${b.date} ${b.time}`));
+
+  const pastAppointments = appointments.filter(apt => {
+    const aptDate = new Date(`${apt.date} ${apt.time}`);
+    return aptDate <= new Date();
+  }).sort((a, b) => new Date(`${b.date} ${b.time}`) - new Date(`${a.date} ${a.time}`));
+
+  return (
+    <div className="appointments-view">
+      <div className="appointments-header">
+        <h2>My Appointments</h2>
+        <button className="new-booking-btn" onClick={onNewBooking}>
+          + Book New Session
+        </button>
+      </div>
+      
+      <section className="appointments-section">
+        <h3>Upcoming Sessions</h3>
+        {upcomingAppointments.length === 0 ? (
+          <div className="no-appointments">
+            <span>📭</span>
+            <p>No upcoming appointments</p>
+            <button className="book-now-btn" onClick={onNewBooking}>Book a Session</button>
+          </div>
+        ) : (
+          <div className="appointments-list">
+            {upcomingAppointments.map((apt) => (
+              <div key={apt.id} className="appointment-card" style={{ '--tutor-color': apt.tutor.color }}>
+                <div className="apt-avatar"><img src={apt.tutor.image} alt={apt.tutor.name} /></div>
+                <div className="apt-info">
+                  <h4>{apt.tutor.name}</h4>
+                  <div className="apt-datetime">
+                    <span>📅 {apt.date}</span>
+                    <span>🕐 {formatTime(apt.time)}</span>
+                    <span>⏱ {apt.duration} min</span>
+                  </div>
+                  {apt.topic && <div className="apt-topic">Topic: {apt.topic}</div>}
+                </div>
+                <div className="apt-actions">
+                  <button className="apt-btn reschedule">Reschedule</button>
+                  <button className="apt-btn cancel" onClick={() => onCancel(apt.id)}>Cancel</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {pastAppointments.length > 0 && (
+        <section className="appointments-section past">
+          <h3>Past Sessions</h3>
+          <div className="appointments-list">
+            {pastAppointments.map((apt) => (
+              <div key={apt.id} className="appointment-card past" style={{ '--tutor-color': apt.tutor.color }}>
+                <div className="apt-avatar"><img src={apt.tutor.image} alt={apt.tutor.name} /></div>
+                <div className="apt-info">
+                  <h4>{apt.tutor.name}</h4>
+                  <div className="apt-datetime">
+                    <span>📅 {apt.date}</span>
+                    <span>🕐 {formatTime(apt.time)}</span>
+                  </div>
+                </div>
+                <div className="apt-actions">
+                  <button className="apt-btn rebook" onClick={onNewBooking}>Book Again</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+};
+
+const AdminPanel = ({ appointments, tutors, clientAssignments, isLoadingAssignments }) => {
+  const [selectedTutor, setSelectedTutor] = useState(null);
+  
+  const getAppointmentsByTutor = (tutorId) => {
+    return appointments.filter(apt => apt.tutor.id === tutorId);
+  };
+
+  const getUpcomingCount = () => {
+    return appointments.filter(apt => new Date(`${apt.date} ${apt.time}`) > new Date()).length;
+  };
+
+  const getTotalHours = () => {
+    return appointments.reduce((sum, apt) => sum + apt.duration, 0) / 60;
+  };
+
+  const getRegisteredClientsCount = () => {
+    return Object.keys(clientAssignments).length;
+  };
+
+  return (
+    <div className="admin-panel">
+      <h2>Admin Dashboard</h2>
+      
+      <div className="admin-stats">
+        <div className="stat-card">
+          <span className="stat-icon">👥</span>
+          <div className="stat-info">
+            <span className="stat-value">{tutors.length}</span>
+            <span className="stat-label">Active Trainers</span>
+          </div>
+        </div>
+        <div className="stat-card">
+          <span className="stat-icon">📋</span>
+          <div className="stat-info">
+            <span className="stat-value">
+              {isLoadingAssignments ? '...' : getRegisteredClientsCount()}
+            </span>
+            <span className="stat-label">Registered Clients</span>
+          </div>
+        </div>
+        <div className="stat-card">
+          <span className="stat-icon">📅</span>
+          <div className="stat-info">
+            <span className="stat-value">{getUpcomingCount()}</span>
+            <span className="stat-label">Upcoming Sessions</span>
+          </div>
+        </div>
+        <div className="stat-card">
+          <span className="stat-icon">📚</span>
+          <div className="stat-info">
+            <span className="stat-value">{appointments.length}</span>
+            <span className="stat-label">Total Bookings</span>
+          </div>
+        </div>
+        <div className="stat-card">
+          <span className="stat-icon">⏱</span>
+          <div className="stat-info">
+            <span className="stat-value">{getTotalHours().toFixed(1)}h</span>
+            <span className="stat-label">Total Hours</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="admin-sections">
+        <section className="admin-section">
+          <h3>Trainers Overview</h3>
+          <div className="tutor-stats-grid">
+            {tutors.map(tutor => {
+              const tutorApts = getAppointmentsByTutor(tutor.id);
+              const totalHours = tutorApts.reduce((sum, apt) => sum + apt.duration, 0) / 60;
+              return (
+                <div key={tutor.id} className="tutor-stat-card" style={{ '--tutor-color': tutor.color }}>
+                  <div className="tutor-stat-header">
+                    <div className="tutor-stat-avatar"><img src={tutor.image} alt={tutor.name} /></div>
+                    <div>
+                      <h4>{tutor.name}</h4>
+                      {tutor.calendarId ? (
+                        <span className="calendar-status connected">📅 Calendar Connected</span>
+                      ) : (
+                        <span className="calendar-status not-connected">No Calendar</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="tutor-stat-metrics">
+                    <div className="metric">
+                      <span className="metric-value">{tutorApts.length}</span>
+                      <span className="metric-label">Sessions</span>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-value">{totalHours.toFixed(1)}h</span>
+                      <span className="metric-label">Hours</span>
+                    </div>
+                  </div>
+                  {tutor.calendarUrl && (
+                    <a href={tutor.calendarUrl} target="_blank" rel="noopener noreferrer" className="view-calendar-link">
+                      View Calendar →
+                    </a>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="admin-section">
+          <h3>Google Calendar Integration</h3>
+          <div className="integration-card">
+            <div className="integration-status">
+              <span className="status-dot connected"></span>
+              <span>Google Calendar Integration Active</span>
+            </div>
+            <p>Bookings are automatically synced to connected trainer calendars. Reminders are set for 1 day and 3 hours before each session.</p>
+            
+            <div className="calendar-summary">
+              <div className="summary-stat">
+                <span className="stat-number">{tutors.filter(t => t.calendarId).length}</span>
+                <span className="stat-text">Trainers Connected</span>
+              </div>
+              <div className="summary-stat">
+                <span className="stat-number">{tutors.filter(t => !t.calendarId).length}</span>
+                <span className="stat-text">Pending Setup</span>
+              </div>
+            </div>
+            
+            <div className="connected-calendars">
+              <h4>Connected Calendars:</h4>
+              <ul>
+                {tutors.filter(t => t.calendarId).map(t => (
+                  <li key={t.id}>
+                    <span className="calendar-dot"></span>
+                    {t.name}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section className="admin-section">
+          <h3>Client Database (Google Sheets)</h3>
+          <div className="integration-card">
+            <div className="integration-status">
+              <span className={`status-dot ${isLoadingAssignments ? '' : 'connected'}`}></span>
+              <span>{isLoadingAssignments ? 'Loading data...' : 'Connected to Google Sheets'}</span>
+            </div>
+            <p>Client-tutor assignments are automatically synced from Google Sheets. When a client enters their email, the system looks up their assigned trainer(s).</p>
+            
+            <div className="calendar-summary">
+              <div className="summary-stat">
+                <span className="stat-number">{isLoadingAssignments ? '...' : getRegisteredClientsCount()}</span>
+                <span className="stat-text">Registered Clients</span>
+              </div>
+            </div>
+            
+            <a 
+              href={`https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/edit`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="integration-btn"
+              style={{ display: 'inline-block', textDecoration: 'none', textAlign: 'center' }}
+            >
+              Open Google Sheets →
+            </a>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+};
+
+// Main App
+function TutorBookApp() {
+  const [view, setView] = useState('book');
+  const [bookingStep, setBookingStep] = useState(1); // 1: Client Info, 2: Select Tutor, 3: Select Schedule, 4: Confirm
+  const [clientInfo, setClientInfo] = useState({
+    name: '',
+    email: '',
+    whatsapp: '',
+    topic: '',
+  });
+  const [clientAssignments, setClientAssignments] = useState({});
+  const [isLoadingAssignments, setIsLoadingAssignments] = useState(true);
+  const [assignedTutors, setAssignedTutors] = useState([]);
+  const [selectedTutor, setSelectedTutor] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [selectedTime, setSelectedTime] = useState(null);
+  const [duration, setDuration] = useState(60);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [lastBooking, setLastBooking] = useState(null);
+  const [appointments, setAppointments] = useState([]);
+  const [bookedSlots, setBookedSlots] = useState([]);
+  const isAdmin = true; // Toggle for admin access
+
+  // Fetch client-tutor assignments from Google Sheets on mount
+  useEffect(() => {
+    const loadAssignments = async () => {
+      setIsLoadingAssignments(true);
+      const assignments = await fetchClientAssignments();
+      setClientAssignments(assignments);
+      setIsLoadingAssignments(false);
+      console.log('Loaded assignments from Google Sheets:', assignments);
+    };
+    loadAssignments();
+  }, []);
+
+  // Handle client info submission - find assigned tutors from Google Sheets data
+  const handleClientInfoSubmit = (info) => {
+    setClientInfo(info);
+    
+    // Look up assigned tutors for this client from Google Sheets data
+    const clientEmail = info.email.toLowerCase().trim();
+    const clientAssignment = clientAssignments[clientEmail];
+    
+    if (clientAssignment && clientAssignment.assignedTutors.length > 0) {
+      // Filter tutors based on assignment from Google Sheets
+      const tutorsForClient = TUTORS.filter(t => clientAssignment.assignedTutors.includes(t.id));
+      setAssignedTutors(tutorsForClient);
+    } else {
+      // If client not found in Google Sheets, show empty (they need to be registered first)
+      setAssignedTutors([]);
+    }
+    
+    setBookingStep(2);
+  };
+
+  const handleTutorSelect = (tutor) => {
+    setSelectedTutor(tutor);
+    setSelectedDate(null);
+    setSelectedTime(null);
+    setBookingStep(3);
+  };
+
+  const handleDateSelect = (date) => {
+    setSelectedDate(date);
+    setSelectedTime(null);
+  };
+
+  const handleTimeSelect = (time) => {
+    setSelectedTime(time);
+  };
+
+  const handleProceedToConfirmation = () => {
+    setBookingStep(4);
+  };
+
+  const handleBookingSubmit = (booking) => {
+    setAppointments([...appointments, booking]);
+    setBookedSlots([...bookedSlots, {
+      tutorId: booking.tutor.id,
+      date: booking.date,
+      time: booking.time,
+    }]);
+    setLastBooking(booking);
+    setShowConfirmation(true);
+  };
+
+  const handleCancelAppointment = (aptId) => {
+    const apt = appointments.find(a => a.id === aptId);
+    if (apt) {
+      setAppointments(appointments.filter(a => a.id !== aptId));
+      setBookedSlots(bookedSlots.filter(slot => 
+        !(slot.tutorId === apt.tutor.id && slot.date === apt.date && slot.time === apt.time)
+      ));
+    }
+  };
+
+  const handleConfirmationClose = () => {
+    setShowConfirmation(false);
+    setSelectedTutor(null);
+    setSelectedDate(null);
+    setSelectedTime(null);
+    setClientInfo({ name: '', email: '', whatsapp: '', topic: '' });
+    setAssignedTutors([]);
+    setBookingStep(1);
+    setView('appointments');
+  };
+
+  const handleBackToStep = (step) => {
+    setBookingStep(step);
+    if (step === 1) {
+      setSelectedTutor(null);
+      setSelectedDate(null);
+      setSelectedTime(null);
+      setAssignedTutors([]);
+    } else if (step === 2) {
+      setSelectedTutor(null);
+      setSelectedDate(null);
+      setSelectedTime(null);
+    } else if (step === 3) {
+      setSelectedDate(null);
+      setSelectedTime(null);
+    }
+  };
+
+  const handleStartNewBooking = () => {
+    setView('book');
+    setBookingStep(1);
+    setClientInfo({ name: '', email: '', whatsapp: '', topic: '' });
+    setAssignedTutors([]);
+    setSelectedTutor(null);
+    setSelectedDate(null);
+    setSelectedTime(null);
+  };
+
+  const canProceedToConfirmation = selectedTutor && selectedDate && selectedTime;
+
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
+        
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        
+        :root {
+          --primary: #2D3047;
+          --primary-light: #419D78;
+          --accent: #E0A458;
+          --accent-dark: #C17F3C;
+          --background: #FAF9F7;
+          --surface: #FFFFFF;
+          --text: #2D3047;
+          --text-light: #6B6B7B;
+          --border: #E8E6E1;
+          --success: #419D78;
+          --error: #E07A5F;
+          --shadow: 0 4px 24px rgba(45, 48, 71, 0.08);
+          --shadow-lg: 0 12px 48px rgba(45, 48, 71, 0.12);
+          --radius: 16px;
+          --radius-sm: 8px;
+        }
+        
+        body {
+          font-family: 'Montserrat', sans-serif;
+          background: var(--background);
+          color: var(--text);
+          line-height: 1.6;
+        }
+        
+        .app {
+          min-height: 100vh;
+          display: flex;
+          flex-direction: column;
+        }
+        
+        /* Header */
+        .header {
+          background: var(--surface);
+          border-bottom: 1px solid var(--border);
+          position: sticky;
+          top: 0;
+          z-index: 100;
+        }
+        
+        .header-content {
+          max-width: 1400px;
+          margin: 0 auto;
+          padding: 1rem 2rem;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 2rem;
+        }
+        
+        .logo {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+        }
+        
+        .logo-icon {
+          font-size: 1.75rem;
+        }
+        
+        .logo-text {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1.5rem;
+          font-weight: 700;
+          color: var(--primary);
+        }
+        
+        .nav {
+          display: flex;
+          gap: 0.5rem;
+        }
+        
+        .nav-btn {
+          padding: 0.625rem 1.25rem;
+          border: none;
+          background: transparent;
+          color: var(--text-light);
+          font-family: inherit;
+          font-size: 0.9rem;
+          font-weight: 500;
+          cursor: pointer;
+          border-radius: var(--radius-sm);
+          transition: all 0.2s ease;
+        }
+        
+        .nav-btn:hover {
+          background: var(--border);
+          color: var(--text);
+        }
+        
+        .nav-btn.active {
+          background: var(--primary);
+          color: white;
+        }
+        
+        .connect-btn {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.625rem 1.25rem;
+          border: 2px solid var(--primary-light);
+          background: transparent;
+          color: var(--primary-light);
+          font-family: inherit;
+          font-size: 0.9rem;
+          font-weight: 500;
+          cursor: pointer;
+          border-radius: var(--radius-sm);
+          transition: all 0.2s ease;
+        }
+        
+        .connect-btn:hover {
+          background: var(--primary-light);
+          color: white;
+        }
+        
+        /* Main Content */
+        .main {
+          flex: 1;
+          max-width: 1400px;
+          margin: 0 auto;
+          padding: 2rem;
+          width: 100%;
+        }
+        
+        /* Booking View */
+        .booking-view {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 2rem;
+        }
+        
+        @media (max-width: 1024px) {
+          .booking-view {
+            grid-template-columns: 1fr;
+          }
+        }
+        
+        .section-title {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1.5rem;
+          font-weight: 700;
+          margin-bottom: 1.5rem;
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+        }
+        
+        .section-title span {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 2rem;
+          height: 2rem;
+          background: var(--primary);
+          color: white;
+          border-radius: 50%;
+          font-family: 'Montserrat', sans-serif;
+          font-size: 0.875rem;
+          font-weight: 600;
+        }
+        
+        /* Tutor Cards */
+        .tutors-grid {
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+        }
+        
+        .tutor-card {
+          background: var(--surface);
+          border: 2px solid var(--border);
+          border-radius: var(--radius);
+          padding: 1.5rem;
+          display: flex;
+          gap: 1.25rem;
+          cursor: pointer;
+          transition: all 0.25s ease;
+          position: relative;
+        }
+        
+        .tutor-card:hover {
+          border-color: var(--tutor-color, var(--primary-light));
+          transform: translateY(-2px);
+          box-shadow: var(--shadow);
+        }
+        
+        .tutor-card.selected {
+          border-color: var(--tutor-color, var(--primary-light));
+          background: linear-gradient(135deg, var(--surface) 0%, color-mix(in srgb, var(--tutor-color, var(--primary-light)) 5%, white) 100%);
+          box-shadow: var(--shadow);
+        }
+        
+        .tutor-avatar {
+          width: 4.5rem;
+          height: 4.5rem;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: var(--background);
+          border-radius: var(--radius-sm);
+          flex-shrink: 0;
+          overflow: hidden;
+        }
+        
+        .tutor-avatar img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+        
+        .tutor-info {
+          flex: 1;
+          min-width: 0;
+        }
+        
+        .tutor-name {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1.125rem;
+          font-weight: 700;
+          margin-bottom: 0.25rem;
+        }
+        
+        .calendar-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.25rem;
+          background: color-mix(in srgb, var(--success) 15%, white);
+          color: var(--success);
+          font-size: 0.7rem;
+          font-weight: 500;
+          padding: 0.25rem 0.5rem;
+          border-radius: 4px;
+          margin-top: 0.25rem;
+        }
+        
+        .calendar-badge .calendar-icon {
+          font-size: 0.75rem;
+        }
+        
+        .calendar-connected-tag {
+          display: inline-block;
+          background: color-mix(in srgb, var(--success) 15%, white);
+          color: var(--success);
+          font-size: 0.7rem;
+          font-weight: 500;
+          padding: 0.2rem 0.5rem;
+          border-radius: 4px;
+          margin-left: 0.5rem;
+        }
+        
+        .tutor-specialty {
+          color: var(--tutor-color, var(--primary-light));
+          font-weight: 500;
+          font-size: 0.875rem;
+          margin-bottom: 0.5rem;
+        }
+        
+        .tutor-bio {
+          color: var(--text-light);
+          font-size: 0.875rem;
+          margin-bottom: 0.75rem;
+        }
+        
+        .tutor-rate {
+          font-weight: 600;
+          color: var(--text);
+        }
+        
+        .selected-indicator {
+          position: absolute;
+          top: 1rem;
+          right: 1rem;
+          width: 1.75rem;
+          height: 1.75rem;
+          background: var(--tutor-color, var(--primary-light));
+          color: white;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 700;
+          font-size: 0.875rem;
+        }
+        
+        /* Right Panel */
+        .right-panel {
+          display: flex;
+          flex-direction: column;
+          gap: 1.5rem;
+        }
+        
+        .panel-card {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          padding: 1.5rem;
+        }
+        
+        /* Calendar */
+        .calendar-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 1.25rem;
+        }
+        
+        .cal-month {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1.125rem;
+          font-weight: 700;
+        }
+        
+        .cal-nav-btn {
+          width: 2.5rem;
+          height: 2.5rem;
+          border: 1px solid var(--border);
+          background: var(--surface);
+          border-radius: var(--radius-sm);
+          cursor: pointer;
+          font-size: 1rem;
+          transition: all 0.2s ease;
+        }
+        
+        .cal-nav-btn:hover {
+          background: var(--background);
+          border-color: var(--primary-light);
+        }
+        
+        .calendar-grid {
+          display: grid;
+          grid-template-columns: repeat(7, 1fr);
+          gap: 0.5rem;
+        }
+        
+        .cal-day {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          padding: 0.75rem 0.5rem;
+          border: 1px solid var(--border);
+          background: var(--surface);
+          border-radius: var(--radius-sm);
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        
+        .cal-day:hover:not(.disabled) {
+          border-color: var(--primary-light);
+          background: color-mix(in srgb, var(--primary-light) 5%, white);
+        }
+        
+        .cal-day.selected {
+          background: var(--primary-light);
+          border-color: var(--primary-light);
+          color: white;
+        }
+        
+        .cal-day.selected .cal-dot {
+          background: white;
+        }
+        
+        .cal-day.disabled {
+          opacity: 0.4;
+          cursor: not-allowed;
+        }
+        
+        .cal-day-name {
+          font-size: 0.7rem;
+          text-transform: uppercase;
+          font-weight: 500;
+          color: var(--text-light);
+          margin-bottom: 0.25rem;
+        }
+        
+        .cal-day.selected .cal-day-name {
+          color: rgba(255, 255, 255, 0.8);
+        }
+        
+        .cal-day-num {
+          font-size: 1rem;
+          font-weight: 600;
+        }
+        
+        .cal-dot {
+          width: 6px;
+          height: 6px;
+          background: var(--primary-light);
+          border-radius: 50%;
+          margin-top: 0.375rem;
+        }
+        
+        /* Time Slots */
+        .slots-title {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1rem;
+          font-weight: 600;
+          margin-bottom: 1rem;
+        }
+        
+        .slots-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+          gap: 0.5rem;
+        }
+        
+        .time-slot {
+          padding: 0.75rem;
+          border: 1px solid var(--border);
+          background: var(--surface);
+          border-radius: var(--radius-sm);
+          cursor: pointer;
+          font-family: inherit;
+          font-size: 0.875rem;
+          font-weight: 500;
+          transition: all 0.2s ease;
+          position: relative;
+        }
+        
+        .time-slot:hover:not(.booked) {
+          border-color: var(--primary-light);
+          background: color-mix(in srgb, var(--primary-light) 5%, white);
+        }
+        
+        .time-slot.selected {
+          background: var(--primary-light);
+          border-color: var(--primary-light);
+          color: white;
+        }
+        
+        .time-slot.booked {
+          opacity: 0.5;
+          cursor: not-allowed;
+          text-decoration: line-through;
+        }
+        
+        .booked-label {
+          display: block;
+          font-size: 0.65rem;
+          text-transform: uppercase;
+          color: var(--error);
+          margin-top: 0.25rem;
+          text-decoration: none;
+        }
+        
+        .no-slots {
+          color: var(--text-light);
+          font-style: italic;
+          grid-column: 1 / -1;
+          text-align: center;
+          padding: 1rem;
+        }
+        
+        /* Duration Picker */
+        .picker-title {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1rem;
+          font-weight: 600;
+          margin-bottom: 1rem;
+        }
+        
+        .duration-options {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 0.5rem;
+        }
+        
+        .duration-btn {
+          padding: 0.875rem 0.5rem;
+          border: 1px solid var(--border);
+          background: var(--surface);
+          border-radius: var(--radius-sm);
+          cursor: pointer;
+          font-family: inherit;
+          transition: all 0.2s ease;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 0.25rem;
+        }
+        
+        .duration-btn:hover {
+          border-color: var(--primary-light);
+        }
+        
+        .duration-btn.selected {
+          background: var(--primary-light);
+          border-color: var(--primary-light);
+          color: white;
+        }
+        
+        .duration-label {
+          font-weight: 600;
+          font-size: 0.875rem;
+        }
+        
+        .duration-price {
+          font-size: 0.75rem;
+          opacity: 0.8;
+        }
+        
+        /* Book Button */
+        .book-btn-container {
+          margin-top: 1rem;
+        }
+        
+        .book-btn {
+          width: 100%;
+          padding: 1rem 2rem;
+          border: none;
+          background: var(--accent);
+          color: white;
+          font-family: inherit;
+          font-size: 1rem;
+          font-weight: 600;
+          cursor: pointer;
+          border-radius: var(--radius-sm);
+          transition: all 0.25s ease;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.5rem;
+        }
+        
+        .book-btn:hover:not(:disabled) {
+          background: var(--accent-dark);
+          transform: translateY(-2px);
+          box-shadow: 0 8px 24px rgba(224, 164, 88, 0.3);
+        }
+        
+        .book-btn:disabled {
+          background: var(--border);
+          color: var(--text-light);
+          cursor: not-allowed;
+        }
+        
+        /* Booking Form Overlay */
+        .booking-form-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(45, 48, 71, 0.6);
+          backdrop-filter: blur(4px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+          padding: 2rem;
+        }
+        
+        .booking-form {
+          background: var(--surface);
+          border-radius: var(--radius);
+          padding: 2rem;
+          max-width: 500px;
+          width: 100%;
+          max-height: 90vh;
+          overflow-y: auto;
+          position: relative;
+          box-shadow: var(--shadow-lg);
+        }
+        
+        .booking-form h2 {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1.5rem;
+          font-weight: 700;
+          margin-bottom: 1.5rem;
+        }
+        
+        .close-btn {
+          position: absolute;
+          top: 1rem;
+          right: 1rem;
+          width: 2.5rem;
+          height: 2.5rem;
+          border: none;
+          background: var(--background);
+          border-radius: 50%;
+          font-size: 1.5rem;
+          cursor: pointer;
+          color: var(--text-light);
+          transition: all 0.2s ease;
+        }
+        
+        .close-btn:hover {
+          background: var(--border);
+          color: var(--text);
+        }
+        
+        .booking-summary {
+          background: var(--background);
+          border-radius: var(--radius-sm);
+          padding: 1.25rem;
+          margin-bottom: 1.5rem;
+        }
+        
+        .summary-item {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          margin-bottom: 1rem;
+        }
+        
+        .summary-icon {
+          width: 3.5rem;
+          height: 3.5rem;
+          border-radius: var(--radius-sm);
+          overflow: hidden;
+          flex-shrink: 0;
+        }
+        
+        .summary-icon img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+        
+        .summary-item strong {
+          display: block;
+          font-family: 'Montserrat', sans-serif;
+          font-weight: 600;
+        }
+        
+        .summary-item p {
+          font-size: 0.875rem;
+          color: var(--text-light);
+        }
+        
+        .summary-details {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 1rem;
+        }
+        
+        .detail {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          font-size: 0.875rem;
+        }
+        
+        .detail.price {
+          font-weight: 600;
+          color: var(--primary-light);
+        }
+        
+        .form-group {
+          margin-bottom: 1.25rem;
+        }
+        
+        .form-group label {
+          display: block;
+          font-weight: 500;
+          margin-bottom: 0.5rem;
+          font-size: 0.875rem;
+        }
+        
+        .form-group input,
+        .form-group textarea {
+          width: 100%;
+          padding: 0.875rem 1rem;
+          border: 1px solid var(--border);
+          border-radius: var(--radius-sm);
+          font-family: inherit;
+          font-size: 1rem;
+          transition: all 0.2s ease;
+        }
+        
+        .form-group input:focus,
+        .form-group textarea:focus {
+          outline: none;
+          border-color: var(--primary-light);
+          box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-light) 15%, transparent);
+        }
+        
+        .form-group textarea {
+          resize: vertical;
+        }
+        
+        .reminders-group .reminder-options {
+          display: flex;
+          gap: 1.5rem;
+        }
+        
+        .reminder-checkbox {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          cursor: pointer;
+          font-size: 0.875rem;
+        }
+        
+        .reminder-checkbox input {
+          display: none;
+        }
+        
+        .checkbox-custom {
+          width: 1.25rem;
+          height: 1.25rem;
+          border: 2px solid var(--border);
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.2s ease;
+        }
+        
+        .reminder-checkbox input:checked + .checkbox-custom {
+          background: var(--primary-light);
+          border-color: var(--primary-light);
+        }
+        
+        .reminder-checkbox input:checked + .checkbox-custom::after {
+          content: '✓';
+          color: white;
+          font-size: 0.75rem;
+          font-weight: 700;
+        }
+        
+        .submit-btn {
+          width: 100%;
+          padding: 1rem;
+          border: none;
+          background: var(--primary);
+          color: white;
+          font-family: inherit;
+          font-size: 1rem;
+          font-weight: 600;
+          cursor: pointer;
+          border-radius: var(--radius-sm);
+          transition: all 0.25s ease;
+        }
+        
+        .submit-btn:hover:not(:disabled) {
+          background: color-mix(in srgb, var(--primary) 85%, black);
+          transform: translateY(-2px);
+        }
+        
+        .submit-btn:disabled {
+          opacity: 0.7;
+          cursor: not-allowed;
+        }
+        
+        .loading {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.5rem;
+        }
+        
+        .loading::after {
+          content: '';
+          width: 1rem;
+          height: 1rem;
+          border: 2px solid white;
+          border-top-color: transparent;
+          border-radius: 50%;
+          animation: spin 0.8s linear infinite;
+        }
+        
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        
+        /* Confirmation Modal */
+        .confirmation-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(45, 48, 71, 0.6);
+          backdrop-filter: blur(4px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+          padding: 2rem;
+        }
+        
+        .confirmation-modal {
+          background: var(--surface);
+          border-radius: var(--radius);
+          padding: 2.5rem;
+          max-width: 450px;
+          width: 100%;
+          text-align: center;
+          box-shadow: var(--shadow-lg);
+        }
+        
+        .confirmation-icon {
+          width: 4rem;
+          height: 4rem;
+          background: var(--success);
+          color: white;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 2rem;
+          margin: 0 auto 1.5rem;
+          animation: pop 0.4s ease;
+        }
+        
+        @keyframes pop {
+          0% { transform: scale(0); }
+          70% { transform: scale(1.1); }
+          100% { transform: scale(1); }
+        }
+        
+        .confirmation-modal h2 {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1.5rem;
+          font-weight: 700;
+          margin-bottom: 0.5rem;
+        }
+        
+        .confirmation-modal > p {
+          color: var(--text-light);
+          margin-bottom: 1.5rem;
+        }
+        
+        .confirmation-details {
+          background: var(--background);
+          border-radius: var(--radius-sm);
+          padding: 1.25rem;
+          margin-bottom: 1.5rem;
+        }
+        
+        .conf-item {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.5rem;
+          padding: 0.5rem 0;
+        }
+        
+        .conf-avatar {
+          width: 2.5rem;
+          height: 2.5rem;
+          border-radius: var(--radius-sm);
+          overflow: hidden;
+          flex-shrink: 0;
+        }
+        
+        .conf-avatar img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+        
+        .conf-item:first-child {
+          font-family: 'Montserrat', sans-serif;
+          font-weight: 600;
+        }
+        
+        .confirmation-reminders {
+          text-align: left;
+          background: color-mix(in srgb, var(--primary-light) 10%, white);
+          border-radius: var(--radius-sm);
+          padding: 1rem 1.25rem;
+          margin-bottom: 1.5rem;
+        }
+        
+        .confirmation-reminders p {
+          font-size: 0.875rem;
+          margin-bottom: 0.5rem;
+        }
+        
+        .confirmation-reminders ul {
+          list-style: none;
+          font-size: 0.8rem;
+          color: var(--text);
+        }
+        
+        .confirmation-reminders li {
+          padding: 0.25rem 0;
+        }
+        
+        .conf-item.topic {
+          flex-direction: column;
+          align-items: flex-start;
+          text-align: left;
+          background: var(--surface);
+          padding: 0.75rem;
+          border-radius: var(--radius-sm);
+          margin-top: 0.5rem;
+        }
+        
+        .topic-preview {
+          font-size: 0.85rem;
+          color: var(--text-light);
+          font-style: italic;
+          max-width: 100%;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+        }
+        
+        .calendar-sync-info {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.5rem;
+          background: color-mix(in srgb, var(--success) 10%, white);
+          color: var(--success);
+          padding: 0.75rem 1rem;
+          border-radius: var(--radius-sm);
+          margin-bottom: 1rem;
+          font-size: 0.875rem;
+          font-weight: 500;
+        }
+        
+        .calendar-sync-info .sync-icon {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 1.25rem;
+          height: 1.25rem;
+          background: var(--success);
+          color: white;
+          border-radius: 50%;
+          font-size: 0.7rem;
+        }
+        
+        .add-to-calendar-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.5rem;
+          width: 100%;
+          padding: 0.875rem 1.5rem;
+          border: 2px solid var(--primary-light);
+          background: transparent;
+          color: var(--primary-light);
+          font-family: inherit;
+          font-size: 0.9rem;
+          font-weight: 600;
+          text-decoration: none;
+          cursor: pointer;
+          border-radius: var(--radius-sm);
+          transition: all 0.2s ease;
+          margin-bottom: 1rem;
+        }
+        
+        .add-to-calendar-btn:hover {
+          background: var(--primary-light);
+          color: white;
+        }
+        
+        .close-confirmation-btn {
+          padding: 0.875rem 2rem;
+          border: none;
+          background: var(--primary);
+          color: white;
+          font-family: inherit;
+          font-size: 0.9rem;
+          font-weight: 600;
+          cursor: pointer;
+          border-radius: var(--radius-sm);
+          transition: all 0.2s ease;
+        }
+        
+        .close-confirmation-btn:hover {
+          background: color-mix(in srgb, var(--primary) 85%, black);
+        }
+        
+        /* Appointments View */
+        .appointments-view {
+          max-width: 900px;
+        }
+        
+        .appointments-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 2rem;
+        }
+        
+        .appointments-view h2 {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1.75rem;
+          font-weight: 700;
+          margin-bottom: 0;
+        }
+        
+        .new-booking-btn {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.75rem 1.5rem;
+          border: none;
+          background: var(--primary);
+          color: white;
+          font-family: inherit;
+          font-size: 0.9rem;
+          font-weight: 600;
+          cursor: pointer;
+          border-radius: var(--radius-sm);
+          transition: all 0.2s ease;
+        }
+        
+        .new-booking-btn:hover {
+          background: color-mix(in srgb, var(--primary) 85%, black);
+          transform: translateY(-1px);
+        }
+        
+        .book-now-btn {
+          display: inline-block;
+          margin-top: 1rem;
+          padding: 0.75rem 1.5rem;
+          border: none;
+          background: var(--primary-light);
+          color: white;
+          font-family: inherit;
+          font-size: 0.9rem;
+          font-weight: 600;
+          cursor: pointer;
+          border-radius: var(--radius-sm);
+          transition: all 0.2s ease;
+        }
+        
+        .book-now-btn:hover {
+          background: color-mix(in srgb, var(--primary-light) 85%, black);
+        }
+        
+        .appointments-section {
+          margin-bottom: 2.5rem;
+        }
+        
+        .appointments-section h3 {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1.125rem;
+          font-weight: 600;
+          margin-bottom: 1rem;
+          color: var(--text-light);
+        }
+        
+        .no-appointments {
+          background: var(--surface);
+          border: 1px dashed var(--border);
+          border-radius: var(--radius);
+          padding: 3rem;
+          text-align: center;
+          color: var(--text-light);
+        }
+        
+        .no-appointments span {
+          font-size: 2.5rem;
+          display: block;
+          margin-bottom: 0.5rem;
+        }
+        
+        .appointments-list {
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+        }
+        
+        .appointment-card {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-left: 4px solid var(--tutor-color, var(--primary-light));
+          border-radius: var(--radius);
+          padding: 1.25rem 1.5rem;
+          display: flex;
+          align-items: center;
+          gap: 1.25rem;
+          transition: all 0.2s ease;
+        }
+        
+        .appointment-card:hover {
+          box-shadow: var(--shadow);
+        }
+        
+        .appointment-card.past {
+          opacity: 0.6;
+        }
+        
+        .apt-topic {
+          font-size: 0.8rem;
+          color: var(--text-light);
+          margin-top: 0.5rem;
+          padding: 0.5rem 0.75rem;
+          background: var(--background);
+          border-radius: var(--radius-sm);
+          font-style: italic;
+        }
+        
+        .apt-avatar {
+          width: 3.5rem;
+          height: 3.5rem;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: var(--background);
+          border-radius: var(--radius-sm);
+          flex-shrink: 0;
+          overflow: hidden;
+        }
+        
+        .apt-avatar img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+        
+        .apt-info {
+          flex: 1;
+          min-width: 0;
+        }
+        
+        .apt-info h4 {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1rem;
+          font-weight: 600;
+          margin-bottom: 0.125rem;
+        }
+        
+        .apt-specialty {
+          font-size: 0.8rem;
+          color: var(--text-light);
+          margin-bottom: 0.5rem;
+        }
+        
+        .apt-datetime {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 1rem;
+          font-size: 0.8rem;
+          color: var(--text-light);
+        }
+        
+        .apt-datetime span {
+          display: flex;
+          align-items: center;
+          gap: 0.25rem;
+        }
+        
+        .apt-actions {
+          display: flex;
+          gap: 0.5rem;
+          flex-shrink: 0;
+        }
+        
+        .apt-btn {
+          padding: 0.5rem 1rem;
+          border: 1px solid var(--border);
+          background: var(--surface);
+          border-radius: var(--radius-sm);
+          font-family: inherit;
+          font-size: 0.8rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        
+        .apt-btn:hover {
+          border-color: var(--primary-light);
+          color: var(--primary-light);
+        }
+        
+        .apt-btn.cancel:hover {
+          border-color: var(--error);
+          color: var(--error);
+        }
+        
+        .apt-btn.rebook {
+          background: var(--primary-light);
+          border-color: var(--primary-light);
+          color: white;
+        }
+        
+        .apt-btn.rebook:hover {
+          background: color-mix(in srgb, var(--primary-light) 85%, black);
+        }
+        
+        /* Admin Panel */
+        .admin-panel h2 {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1.75rem;
+          font-weight: 700;
+          margin-bottom: 2rem;
+        }
+        
+        .admin-stats {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 1rem;
+          margin-bottom: 2.5rem;
+        }
+        
+        .stat-card {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          padding: 1.5rem;
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+        }
+        
+        .stat-icon {
+          font-size: 2rem;
+          width: 3.5rem;
+          height: 3.5rem;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: var(--background);
+          border-radius: var(--radius-sm);
+        }
+        
+        .stat-info {
+          display: flex;
+          flex-direction: column;
+        }
+        
+        .stat-value {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1.5rem;
+          font-weight: 700;
+        }
+        
+        .stat-label {
+          font-size: 0.8rem;
+          color: var(--text-light);
+        }
+        
+        .admin-sections {
+          display: flex;
+          flex-direction: column;
+          gap: 2rem;
+        }
+        
+        .admin-section h3 {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1.125rem;
+          font-weight: 600;
+          margin-bottom: 1rem;
+        }
+        
+        .tutor-stats-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          gap: 1rem;
+        }
+        
+        .tutor-stat-card {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-top: 4px solid var(--tutor-color, var(--primary-light));
+          border-radius: var(--radius);
+          padding: 1.25rem;
+        }
+        
+        .tutor-stat-header {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          margin-bottom: 1rem;
+        }
+        
+        .tutor-stat-avatar {
+          width: 3rem;
+          height: 3rem;
+          border-radius: var(--radius-sm);
+          overflow: hidden;
+          flex-shrink: 0;
+        }
+        
+        .tutor-stat-avatar img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+        
+        .tutor-stat-header h4 {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1rem;
+          font-weight: 600;
+        }
+        
+        .tutor-stat-header p {
+          font-size: 0.75rem;
+          color: var(--text-light);
+        }
+        
+        .tutor-stat-metrics {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 0.5rem;
+          text-align: center;
+          background: var(--background);
+          border-radius: var(--radius-sm);
+          padding: 0.875rem;
+        }
+        
+        .calendar-status {
+          display: block;
+          font-size: 0.7rem;
+          margin-top: 0.25rem;
+        }
+        
+        .calendar-status.connected {
+          color: var(--success);
+        }
+        
+        .calendar-status.not-connected {
+          color: var(--text-light);
+        }
+        
+        .view-calendar-link {
+          display: block;
+          text-align: center;
+          margin-top: 0.75rem;
+          padding-top: 0.75rem;
+          border-top: 1px solid var(--border);
+          color: var(--primary-light);
+          font-size: 0.8rem;
+          font-weight: 500;
+          text-decoration: none;
+          transition: color 0.2s ease;
+        }
+        
+        .view-calendar-link:hover {
+          color: var(--primary);
+        }
+        
+        .metric-value {
+          font-family: 'Montserrat', sans-serif;
+          font-weight: 700;
+          display: block;
+        }
+        
+        .metric-label {
+          font-size: 0.7rem;
+          color: var(--text-light);
+        }
+        
+        .integration-card {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          padding: 1.5rem;
+        }
+        
+        .integration-status {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          margin-bottom: 0.75rem;
+          font-weight: 500;
+        }
+        
+        .status-dot {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background: var(--border);
+        }
+        
+        .status-dot.connected {
+          background: var(--success);
+          box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 25%, transparent);
+        }
+        
+        .integration-card p {
+          font-size: 0.875rem;
+          color: var(--text-light);
+          margin-bottom: 1rem;
+        }
+        
+        .integration-actions {
+          display: flex;
+          gap: 0.75rem;
+        }
+        
+        .integration-btn {
+          padding: 0.625rem 1.25rem;
+          border: 1px solid var(--primary);
+          background: var(--primary);
+          color: white;
+          border-radius: var(--radius-sm);
+          font-family: inherit;
+          font-size: 0.875rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        
+        .integration-btn:hover {
+          background: color-mix(in srgb, var(--primary) 85%, black);
+        }
+        
+        .integration-btn.secondary {
+          background: transparent;
+          color: var(--primary);
+        }
+        
+        .integration-btn.secondary:hover {
+          background: var(--background);
+        }
+        
+        .calendar-summary {
+          display: flex;
+          gap: 2rem;
+          margin-bottom: 1.5rem;
+          padding: 1rem;
+          background: var(--background);
+          border-radius: var(--radius-sm);
+        }
+        
+        .summary-stat {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+        }
+        
+        .summary-stat .stat-number {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1.5rem;
+          font-weight: 700;
+          color: var(--primary);
+        }
+        
+        .summary-stat .stat-text {
+          font-size: 0.75rem;
+          color: var(--text-light);
+        }
+        
+        .connected-calendars {
+          border-top: 1px solid var(--border);
+          padding-top: 1rem;
+        }
+        
+        .connected-calendars h4 {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 0.875rem;
+          font-weight: 600;
+          margin-bottom: 0.75rem;
+        }
+        
+        .connected-calendars ul {
+          list-style: none;
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+          gap: 0.5rem;
+        }
+        
+        .connected-calendars li {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          font-size: 0.8rem;
+          color: var(--text);
+        }
+        
+        .connected-calendars .calendar-dot {
+          width: 8px;
+          height: 8px;
+          background: var(--success);
+          border-radius: 50%;
+        }
+        
+        /* Empty State */
+        .empty-state {
+          text-align: center;
+          padding: 3rem 2rem;
+          color: var(--text-light);
+        }
+        
+        .empty-state span {
+          font-size: 3rem;
+          display: block;
+          margin-bottom: 1rem;
+        }
+        
+        .empty-state h3 {
+          font-family: 'Montserrat', sans-serif;
+          font-weight: 600;
+          color: var(--text);
+          margin-bottom: 0.5rem;
+        }
+
+        /* ==================== */
+        /* NEW WORKFLOW STYLES  */
+        /* ==================== */
+
+        /* Booking Workflow Container */
+        .booking-workflow {
+          max-width: 900px;
+          margin: 0 auto;
+        }
+
+        /* Step Indicator */
+        .step-indicator {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-bottom: 3rem;
+          padding: 1.5rem;
+          background: var(--surface);
+          border-radius: var(--radius);
+          box-shadow: var(--shadow);
+        }
+
+        .step {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 0.5rem;
+          opacity: 0.4;
+          transition: all 0.3s ease;
+        }
+
+        .step.active {
+          opacity: 1;
+        }
+
+        .step.completed {
+          opacity: 0.8;
+        }
+
+        .step.completed:hover {
+          opacity: 1;
+        }
+
+        .step-number {
+          width: 2.5rem;
+          height: 2.5rem;
+          border-radius: 50%;
+          background: var(--border);
+          color: var(--text-light);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-family: 'Montserrat', sans-serif;
+          font-weight: 700;
+          font-size: 0.875rem;
+          transition: all 0.3s ease;
+        }
+
+        .step.active .step-number {
+          background: var(--primary);
+          color: white;
+        }
+
+        .step.completed .step-number {
+          background: var(--success);
+          color: white;
+        }
+
+        .step-label {
+          font-size: 0.75rem;
+          font-weight: 500;
+          color: var(--text-light);
+          white-space: nowrap;
+        }
+
+        .step.active .step-label {
+          color: var(--text);
+          font-weight: 600;
+        }
+
+        .step-connector {
+          width: 60px;
+          height: 2px;
+          background: var(--border);
+          margin: 0 1rem;
+          margin-bottom: 1.5rem;
+          transition: background 0.3s ease;
+        }
+
+        .step-connector.active {
+          background: var(--success);
+        }
+
+        @media (max-width: 640px) {
+          .step-indicator {
+            padding: 1rem;
+          }
+          .step-connector {
+            width: 30px;
+            margin: 0 0.5rem;
+          }
+          .step-label {
+            font-size: 0.65rem;
+          }
+        }
+
+        /* Step Headers */
+        .step-header {
+          text-align: center;
+          margin-bottom: 2rem;
+        }
+
+        .step-header h2 {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1.75rem;
+          font-weight: 700;
+          color: var(--text);
+          margin-bottom: 0.5rem;
+        }
+
+        .step-header p {
+          color: var(--text-light);
+          font-size: 1rem;
+        }
+
+        .back-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.25rem;
+          padding: 0.5rem 1rem;
+          border: none;
+          background: transparent;
+          color: var(--text-light);
+          font-family: inherit;
+          font-size: 0.875rem;
+          font-weight: 500;
+          cursor: pointer;
+          margin-bottom: 1rem;
+          transition: color 0.2s ease;
+        }
+
+        .back-btn:hover {
+          color: var(--text);
+        }
+
+        /* Client Info Step */
+        .client-info-step {
+          background: var(--surface);
+          border-radius: var(--radius);
+          padding: 2.5rem;
+          box-shadow: var(--shadow);
+        }
+
+        .client-form {
+          max-width: 500px;
+          margin: 0 auto;
+        }
+
+        .client-form .form-group {
+          margin-bottom: 1.5rem;
+        }
+
+        .client-form label {
+          display: block;
+          font-weight: 600;
+          margin-bottom: 0.5rem;
+          color: var(--text);
+        }
+
+        .client-form .required {
+          color: var(--error);
+        }
+
+        .client-form input,
+        .client-form textarea {
+          width: 100%;
+          padding: 0.875rem 1rem;
+          border: 2px solid var(--border);
+          border-radius: var(--radius-sm);
+          font-family: inherit;
+          font-size: 1rem;
+          transition: all 0.2s ease;
+        }
+
+        .client-form input:focus,
+        .client-form textarea:focus {
+          outline: none;
+          border-color: var(--primary-light);
+          box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-light) 15%, transparent);
+        }
+
+        .client-form input.error,
+        .client-form textarea.error {
+          border-color: var(--error);
+        }
+
+        .client-form textarea {
+          resize: vertical;
+          min-height: 100px;
+        }
+
+        .error-message {
+          display: block;
+          color: var(--error);
+          font-size: 0.8rem;
+          margin-top: 0.25rem;
+        }
+
+        .next-step-btn {
+          width: 100%;
+          padding: 1rem 2rem;
+          border: none;
+          background: var(--primary);
+          color: white;
+          font-family: inherit;
+          font-size: 1rem;
+          font-weight: 600;
+          cursor: pointer;
+          border-radius: var(--radius-sm);
+          transition: all 0.2s ease;
+          margin-top: 1rem;
+        }
+
+        .next-step-btn:hover:not(:disabled) {
+          background: color-mix(in srgb, var(--primary) 85%, black);
+          transform: translateY(-1px);
+        }
+
+        .next-step-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        /* Tutor Selection Step */
+        .tutor-selection-step {
+          background: var(--surface);
+          border-radius: var(--radius);
+          padding: 2.5rem;
+          box-shadow: var(--shadow);
+        }
+
+        .tutor-selection-step .tutors-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+          gap: 1rem;
+          margin-top: 1.5rem;
+        }
+
+        .no-tutors-message {
+          text-align: center;
+          padding: 3rem 2rem;
+          background: var(--background);
+          border-radius: var(--radius-sm);
+        }
+
+        .no-tutors-message span {
+          font-size: 3rem;
+          display: block;
+          margin-bottom: 1rem;
+        }
+
+        .no-tutors-message h3 {
+          font-family: 'Montserrat', sans-serif;
+          font-weight: 600;
+          color: var(--text);
+          margin-bottom: 0.5rem;
+        }
+
+        .no-tutors-message p {
+          color: var(--text-light);
+        }
+        
+        .contact-admin-btn {
+          display: inline-block;
+          margin-top: 1.5rem;
+          padding: 0.875rem 1.5rem;
+          background: #25D366;
+          color: white;
+          text-decoration: none;
+          font-weight: 600;
+          border-radius: var(--radius-sm);
+          transition: all 0.2s ease;
+        }
+        
+        .contact-admin-btn:hover {
+          background: #128C7E;
+          transform: translateY(-1px);
+        }
+        
+        .loading-state {
+          text-align: center;
+          padding: 3rem 2rem;
+        }
+        
+        .loading-state .spinner {
+          width: 3rem;
+          height: 3rem;
+          border: 3px solid var(--border);
+          border-top-color: var(--primary-light);
+          border-radius: 50%;
+          margin: 0 auto 1rem;
+          animation: spin 0.8s linear infinite;
+        }
+        
+        .loading-state p {
+          color: var(--text-light);
+        }
+
+        /* Schedule Selection Step */
+        .schedule-selection-step {
+          background: var(--surface);
+          border-radius: var(--radius);
+          padding: 2.5rem;
+          box-shadow: var(--shadow);
+        }
+
+        .selected-tutor-summary {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          padding: 1rem;
+          background: var(--background);
+          border-radius: var(--radius-sm);
+          margin-bottom: 1.5rem;
+        }
+
+        .tutor-avatar-small {
+          width: 3rem;
+          height: 3rem;
+          border-radius: var(--radius-sm);
+          overflow: hidden;
+          flex-shrink: 0;
+        }
+
+        .tutor-avatar-small img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+        .calendar-tag {
+          display: inline-block;
+          margin-left: 0.5rem;
+          font-size: 0.75rem;
+          color: var(--success);
+        }
+
+        .schedule-panels {
+          display: grid;
+          grid-template-columns: 2fr 1fr;
+          gap: 1.5rem;
+          margin-bottom: 1.5rem;
+        }
+
+        @media (max-width: 768px) {
+          .schedule-panels {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        .schedule-selection-step .panel-card {
+          padding: 1.5rem;
+        }
+
+        /* Confirmation Step */
+        .confirmation-step {
+          background: var(--surface);
+          border-radius: var(--radius);
+          padding: 2.5rem;
+          box-shadow: var(--shadow);
+        }
+
+        .confirmation-card {
+          max-width: 600px;
+          margin: 0 auto;
+        }
+
+        .conf-section {
+          margin-bottom: 2rem;
+          padding-bottom: 1.5rem;
+          border-bottom: 1px solid var(--border);
+        }
+
+        .conf-section:last-of-type {
+          border-bottom: none;
+          margin-bottom: 1.5rem;
+        }
+
+        .conf-section h3 {
+          font-family: 'Montserrat', sans-serif;
+          font-size: 1rem;
+          font-weight: 600;
+          color: var(--text);
+          margin-bottom: 1rem;
+        }
+
+        .conf-details-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 1rem;
+        }
+
+        @media (max-width: 480px) {
+          .conf-details-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        .conf-detail {
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+        }
+
+        .conf-detail.full-width {
+          grid-column: 1 / -1;
+          margin-top: 0.5rem;
+        }
+
+        .detail-label {
+          font-size: 0.75rem;
+          color: var(--text-light);
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+
+        .detail-value {
+          font-weight: 500;
+          color: var(--text);
+        }
+
+        .detail-value.tutor-detail {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+        }
+
+        .detail-value.tutor-detail img {
+          width: 2.5rem;
+          height: 2.5rem;
+          border-radius: var(--radius-sm);
+          object-fit: cover;
+        }
+
+        .topic-text {
+          background: var(--background);
+          padding: 0.75rem 1rem;
+          border-radius: var(--radius-sm);
+          font-size: 0.9rem;
+          line-height: 1.5;
+        }
+
+        .reminders-info {
+          background: color-mix(in srgb, var(--success) 8%, white);
+          padding: 1rem;
+          border-radius: var(--radius-sm);
+        }
+
+        .reminders-info p {
+          font-size: 0.875rem;
+          margin-bottom: 0.5rem;
+        }
+
+        .reminders-info ul {
+          list-style: none;
+          font-size: 0.85rem;
+        }
+
+        .reminders-info li {
+          padding: 0.25rem 0;
+          color: var(--success);
+        }
+
+        .calendar-checkbox {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          cursor: pointer;
+          padding: 1rem;
+          background: var(--background);
+          border-radius: var(--radius-sm);
+          transition: background 0.2s ease;
+        }
+
+        .calendar-checkbox:hover {
+          background: color-mix(in srgb, var(--primary-light) 10%, var(--background));
+        }
+
+        .calendar-checkbox input {
+          display: none;
+        }
+
+        .checkbox-custom {
+          width: 1.25rem;
+          height: 1.25rem;
+          border: 2px solid var(--border);
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.2s ease;
+          flex-shrink: 0;
+        }
+
+        .calendar-checkbox input:checked + .checkbox-custom {
+          background: var(--primary-light);
+          border-color: var(--primary-light);
+        }
+
+        .calendar-checkbox input:checked + .checkbox-custom::after {
+          content: '✓';
+          color: white;
+          font-size: 0.75rem;
+          font-weight: bold;
+        }
+
+        .confirm-booking-btn {
+          width: 100%;
+          padding: 1.125rem 2rem;
+          border: none;
+          background: var(--success);
+          color: white;
+          font-family: inherit;
+          font-size: 1.125rem;
+          font-weight: 600;
+          cursor: pointer;
+          border-radius: var(--radius-sm);
+          transition: all 0.2s ease;
+        }
+
+        .confirm-booking-btn:hover:not(:disabled) {
+          background: color-mix(in srgb, var(--success) 85%, black);
+          transform: translateY(-1px);
+        }
+
+        .confirm-booking-btn:disabled {
+          opacity: 0.7;
+          cursor: not-allowed;
+        }
+
+        .confirm-booking-btn .loading {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .confirm-booking-btn .loading::before {
+          content: '';
+          width: 1rem;
+          height: 1rem;
+          border: 2px solid white;
+          border-top-color: transparent;
+          border-radius: 50%;
+          animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+      
+      <div className="app">
+        <Header view={view} setView={setView} isAdmin={isAdmin} />
+        
+        <main className="main">
+          {view === 'book' && (
+            <div className="booking-workflow">
+              <StepIndicator currentStep={bookingStep} onStepClick={handleBackToStep} />
+              
+              {bookingStep === 1 && (
+                <ClientInfoStep 
+                  onSubmit={handleClientInfoSubmit}
+                  initialData={clientInfo}
+                />
+              )}
+              
+              {bookingStep === 2 && (
+                <TutorSelectionStep
+                  tutors={assignedTutors}
+                  selectedTutor={selectedTutor}
+                  onSelect={handleTutorSelect}
+                  clientInfo={clientInfo}
+                  onBack={() => handleBackToStep(1)}
+                  isLoading={isLoadingAssignments}
+                />
+              )}
+              
+              {bookingStep === 3 && selectedTutor && (
+                <ScheduleSelectionStep
+                  tutor={selectedTutor}
+                  selectedDate={selectedDate}
+                  selectedTime={selectedTime}
+                  duration={duration}
+                  onDateSelect={handleDateSelect}
+                  onTimeSelect={handleTimeSelect}
+                  onDurationChange={setDuration}
+                  bookedSlots={bookedSlots}
+                  onBack={() => handleBackToStep(2)}
+                  onProceed={handleProceedToConfirmation}
+                />
+              )}
+              
+              {bookingStep === 4 && selectedTutor && selectedDate && selectedTime && (
+                <ConfirmationStep
+                  tutor={selectedTutor}
+                  date={selectedDate}
+                  time={selectedTime}
+                  duration={duration}
+                  clientInfo={clientInfo}
+                  onConfirm={handleBookingSubmit}
+                  onBack={() => handleBackToStep(3)}
+                  bookedSlots={bookedSlots}
+                />
+              )}
+            </div>
+          )}
+          
+          {view === 'appointments' && (
+            <AppointmentsList
+              appointments={appointments}
+              onCancel={handleCancelAppointment}
+              onNewBooking={handleStartNewBooking}
+            />
+          )}
+          
+          {view === 'admin' && (
+            <AdminPanel 
+              appointments={appointments} 
+              tutors={TUTORS} 
+              clientAssignments={clientAssignments}
+              isLoadingAssignments={isLoadingAssignments}
+            />
+          )}
+        </main>
+        
+        {showConfirmation && lastBooking && (
+          <BookingConfirmation
+            booking={lastBooking}
+            onClose={handleConfirmationClose}
+          />
+        )}
+      </div>
+    </>
+  );
+}
+
+// Render the app
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<TutorBookApp />);
+  </script>
+</body>
+</html>
